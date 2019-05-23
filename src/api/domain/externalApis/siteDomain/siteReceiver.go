@@ -9,12 +9,11 @@ import (
 	"gopkg.in/eapache/go-resiliency.v1/breaker"
 	"io/ioutil"
 	"net/http"
-	"time"
 )
 
 const apiUrl = "sites/"
 
-var userBreaker = breaker.New(3, 1, 2*time.Minute)
+var userBreaker = breaker.New(externalApis.ErrorThreshold, externalApis.SuccessThreshold, externalApis.TimeOpen)
 
 func (s *Site) Get() *errors.ApiError {
 
@@ -26,6 +25,9 @@ func (s *Site) Get() *errors.ApiError {
 	}
 	var apiError *errors.ApiError = nil
 	url := fmt.Sprintf("%s%s%s", externalApis.BaseUrl, apiUrl, s.ID)
+	//Lamada a Circuit Breaker
+	//Se considera que la llamada fallo cuando es un error 5xx o
+	//falla la conexion (http.Get(url) retorna error)
 	err := userBreaker.Run(func() error {
 		response, err := http.Get(url)
 		if response != nil {
@@ -35,12 +37,12 @@ func (s *Site) Get() *errors.ApiError {
 			return err
 		}
 		if response.StatusCode != http.StatusOK {
-			if response.StatusCode >= http.StatusInternalServerError {
-				return errors2.New(response.Status)
-			}
 			apiError = &errors.ApiError{
 				Message: response.Status,
 				Status:  response.StatusCode,
+			}
+			if response.StatusCode >= http.StatusInternalServerError {
+				return errors2.New("Server-Error")
 			}
 			return nil
 		}
@@ -60,10 +62,13 @@ func (s *Site) Get() *errors.ApiError {
 		return apiError
 	case breaker.ErrBreakerOpen:
 		return &errors.ApiError{
-			Message: "circuit Breaker Open",
+			Message: "circuit Breaker Site Open",
 			Status:  http.StatusServiceUnavailable,
 		}
 	default:
+		if err.Error() == "Server-Error" {
+			return apiError
+		}
 		return &errors.ApiError{
 			Message: err.Error(),
 			Status:  http.StatusInternalServerError,

@@ -9,12 +9,11 @@ import (
 	"gopkg.in/eapache/go-resiliency.v1/breaker"
 	"io/ioutil"
 	"net/http"
-	"time"
 )
 
 const apiUrl = "countries/"
 
-var countryBreaker = breaker.New(3, 1, 2*time.Minute)
+var countryBreaker = breaker.New(externalApis.ErrorThreshold, externalApis.SuccessThreshold, externalApis.TimeOpen)
 
 func (c *Country) Get() *errors.ApiError {
 
@@ -26,7 +25,10 @@ func (c *Country) Get() *errors.ApiError {
 	}
 	var apiError *errors.ApiError = nil
 	url := fmt.Sprintf("%s%s%s", externalApis.BaseUrl, apiUrl, c.ID)
-	result := countryBreaker.Run(func() error {
+	//Lamada a Circuit Breaker
+	//Se considera que la llamada fallo cuando es un error 5xx o
+	//falla la conexion (http.Get(url) retorna error)
+	err := countryBreaker.Run(func() error {
 		response, err := http.Get(url)
 		if response != nil {
 			defer response.Body.Close()
@@ -35,12 +37,12 @@ func (c *Country) Get() *errors.ApiError {
 			return err
 		}
 		if response.StatusCode != http.StatusOK {
-			if response.StatusCode >= http.StatusInternalServerError {
-				return errors2.New(response.Status)
-			}
 			apiError = &errors.ApiError{
 				Message: response.Status,
 				Status:  response.StatusCode,
+			}
+			if response.StatusCode >= http.StatusInternalServerError {
+				return errors2.New("Server-Error")
 			}
 			return nil
 		}
@@ -54,17 +56,20 @@ func (c *Country) Get() *errors.ApiError {
 		}
 		return nil
 	})
-	switch result {
+	switch err {
 	case nil:
 		return apiError
 	case breaker.ErrBreakerOpen:
 		return &errors.ApiError{
-			Message: "Abierto circuitBreaker",
+			Message: "circuit Breaker Country Open",
 			Status:  http.StatusServiceUnavailable,
 		}
 	default:
+		if err.Error() == "Server-Error" {
+			return apiError
+		}
 		return &errors.ApiError{
-			Message: result.Error(),
+			Message: err.Error(),
 			Status:  http.StatusInternalServerError,
 		}
 	}
