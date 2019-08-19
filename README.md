@@ -8,8 +8,8 @@ https://gopkg.in/eapache/go-resiliency.v1
 
 ## Uso
 Para hacer uso de la api hacer una peticion GET del siguien endPoint: 
-http://localhost:8080/usersync/NroDeUsario 
-donde NroDeUsario es un numero entero.
+http://localhost:8080/usersync/{user} 
+donde {user} es un numero entero.
 
 Para caso de uso con fallo de una de las API externas puede usar el siguiente mock server:
 https://github.com/letcharren/mockServer
